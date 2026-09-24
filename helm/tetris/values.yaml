@@ -2,7 +2,7 @@ replicaCount: 2
 
 image:
   repository: 892387177992.dkr.ecr.ap-south-1.amazonaws.com/tetris
-  tag: 17
+  tag: 18
   pullPolicy: Always
 
 service:
