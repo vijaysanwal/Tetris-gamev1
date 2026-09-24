@@ -159,28 +159,26 @@ pipeline {
         stage('Push Helm Changes') {
             steps {
                 withCredentials([
-                    usernamePassword(
+                    string(
                         credentialsId: 'github',
-                        usernameVariable: 'GIT_USERNAME',
-                        passwordVariable: 'GIT_PASSWORD'
+                        variable: 'GITHUB_TOKEN'
                     )
                 ]) {
                     sh '''
                         echo "Pushing Helm image tag update..."
-
+        
                         git config credential.helper '!f() {
-                            echo username=$GIT_USERNAME
-                            echo password=$GIT_PASSWORD
+                            echo username=vijaysanwal
+                            echo password=$GITHUB_TOKEN
                         }; f'
-
+        
                         git push origin HEAD:main
-
+        
                         git config --unset credential.helper
                     '''
                 }
             }
         }
-    }
 
     post {
 
