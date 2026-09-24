@@ -1,64 +1,151 @@
-pipeline{
+pipeline {
+
     agent any
-    tools{
-        jdk 'jdk17'
-        terraform 'terraform'
+
+    environment {
+        AWS_REGION    = 'ap-south-1'
+        AWS_ACCOUNT   = '892387177992'
+        ECR_REGISTRY  = "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        ECR_REPOSITORY = 'tetris'
+        IMAGE_TAG     = "${BUILD_NUMBER}"
+        IMAGE_NAME    = "${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
     }
-    stages{
-        stage('clean Workspace'){
-            steps{
+
+    stages {
+
+        stage('Clean Workspace') {
+            steps {
                 cleanWs()
             }
         }
-        stage('checkout from Git'){
-            steps{
-                git branch: 'main', url: 'https://github.com/Aj7Ay/TERRAFORM-JENKINS-CICD.git'
-            }
-        }
-        stage('Terraform version'){
-             steps{
-                 sh 'terraform --version'
-                }
-        }
-        stage("Sonarqube Analysis "){
-            steps{
-                withSonarQubeEnv('sonar-server') {
-                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Terraform \
-                    -Dsonar.projectKey=Terraform '''
-                }
-            }
-        }
-        stage("quality gate"){
-           steps {
-                script {
-                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token' 
-                }
-            } 
-        }
-        stage('TRIVY FS SCAN') {
+
+        stage('Checkout') {
             steps {
-                sh "trivy fs . > trivyfs.txt"
+                git(
+                    branch: 'main',
+                    url: 'https://github.com/vijaysanwal/Tetris-gamev1.git'
+                )
             }
         }
-        stage('Excutable permission to userdata'){
-            steps{
-                sh 'chmod 777 website.sh'
+
+        stage('Node Version') {
+            steps {
+                sh '''
+                    node --version
+                    npm --version
+                '''
             }
         }
-        stage('Terraform init'){
-            steps{
-                sh 'terraform init'
+
+        stage('Install Dependencies') {
+            steps {
+                sh 'npm ci'
             }
         }
-        stage('Terraform plan'){
-            steps{
-                sh 'terraform plan'
+
+        stage('Build React Application') {
+            steps {
+                sh 'npm run build'
             }
         }
-        stage('Terraform apply'){
-            steps{
-                sh 'terraform ${action} --auto approve'
+
+        stage('Trivy Filesystem Scan') {
+            steps {
+                sh '''
+                    trivy fs \
+                    --severity HIGH,CRITICAL \
+                    --exit-code 0 \
+                    .
+                '''
             }
+        }
+
+        stage('Docker Buildx') {
+            steps {
+                sh '''
+                    docker buildx version
+                    docker buildx inspect --bootstrap
+                '''
+            }
+        }
+
+        stage('Login to ECR') {
+            steps {
+                sh '''
+                    aws ecr get-login-password --region ${AWS_REGION} | \
+                    docker login \
+                    --username AWS \
+                    --password-stdin ${ECR_REGISTRY}
+                '''
+            }
+        }
+
+        stage('Build and Push Docker Image') {
+            steps {
+                sh '''
+                    docker buildx build \
+                        --platform linux/arm64 \
+                        -t ${IMAGE_NAME} \
+                        --push .
+                '''
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            steps {
+                sh '''
+                    docker pull --platform linux/arm64 ${IMAGE_NAME}
+
+                    trivy image \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 0 \
+                        ${IMAGE_NAME}
+                '''
+            }
+        }
+
+        stage('Update Helm Image') {
+            steps {
+                sh '''
+                    sed -i "s|tag: \".*\"|tag: \"${IMAGE_TAG}\"|" \
+                    helm/tetris/values.yaml
+
+                    grep -n "repository\\|tag:" helm/tetris/values.yaml
+                '''
+            }
+        }
+
+        stage('Commit Helm Changes') {
+            steps {
+                sh '''
+                    git config user.name "jenkins"
+                    git config user.email "jenkins@localhost"
+
+                    git add helm/tetris/values.yaml
+
+                    git diff --cached --quiet || \
+                    git commit -m "Update Tetris image to ${IMAGE_TAG} [ci skip]"
+                '''
+            }
+        }
+
+        stage('Push Helm Changes') {
+            steps {
+                sh '''
+                    git push origin HEAD:main
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Tetris CI/CD pipeline completed successfully.'
+            echo "Docker image: ${IMAGE_NAME}"
+        }
+
+        failure {
+            echo 'Tetris CI/CD pipeline failed.'
         }
     }
 }
