@@ -3,12 +3,12 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION    = 'ap-south-1'
-        AWS_ACCOUNT   = '892387177992'
-        ECR_REGISTRY  = "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-        ECR_REPOSITORY = 'tetris'
-        IMAGE_TAG     = "${BUILD_NUMBER}"
-        IMAGE_NAME    = "${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+        AWS_REGION      = 'ap-south-1'
+        AWS_ACCOUNT     = '892387177992'
+        ECR_REGISTRY    = "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        ECR_REPOSITORY  = 'tetris'
+        IMAGE_TAG       = "${BUILD_NUMBER}"
+        IMAGE_NAME      = "${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
     }
 
     stages {
@@ -28,42 +28,48 @@ pipeline {
             }
         }
 
-        stage('Node Version') {
+        stage('Check Environment') {
             steps {
                 sh '''
-                    node --version
-                    npm --version
+                    echo "===== Docker ====="
+                    docker --version
+
+                    echo "===== Docker Buildx ====="
+                    docker buildx version
+
+                    echo "===== AWS CLI ====="
+                    aws --version
+
+                    echo "===== Trivy ====="
+                    trivy --version
+
+                    echo "===== Helm ====="
+                    helm version --short
+
+                    echo "===== Image ====="
+                    echo "${IMAGE_NAME}"
                 '''
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                sh 'npm ci'
-            }
-        }
-
-        stage('Build React Application') {
-            steps {
-                sh 'npm run build'
             }
         }
 
         stage('Trivy Filesystem Scan') {
             steps {
                 sh '''
+                    echo "Running Trivy filesystem scan..."
+
                     trivy fs \
-                    --severity HIGH,CRITICAL \
-                    --exit-code 0 \
-                    .
+                        --severity HIGH,CRITICAL \
+                        --exit-code 0 \
+                        .
                 '''
             }
         }
 
-        stage('Docker Buildx') {
+        stage('Docker Buildx Check') {
             steps {
                 sh '''
-                    docker buildx version
+                    echo "Checking Docker Buildx..."
+
                     docker buildx inspect --bootstrap
                 '''
             }
@@ -72,10 +78,13 @@ pipeline {
         stage('Login to ECR') {
             steps {
                 sh '''
-                    aws ecr get-login-password --region ${AWS_REGION} | \
+                    echo "Logging in to ECR..."
+
+                    aws ecr get-login-password \
+                        --region ${AWS_REGION} | \
                     docker login \
-                    --username AWS \
-                    --password-stdin ${ECR_REGISTRY}
+                        --username AWS \
+                        --password-stdin ${ECR_REGISTRY}
                 '''
             }
         }
@@ -83,6 +92,8 @@ pipeline {
         stage('Build and Push Docker Image') {
             steps {
                 sh '''
+                    echo "Building Tetris Docker image..."
+
                     docker buildx build \
                         --platform linux/arm64 \
                         -t ${IMAGE_NAME} \
@@ -94,7 +105,13 @@ pipeline {
         stage('Trivy Image Scan') {
             steps {
                 sh '''
-                    docker pull --platform linux/arm64 ${IMAGE_NAME}
+                    echo "Pulling image for security scan..."
+
+                    docker pull \
+                        --platform linux/arm64 \
+                        ${IMAGE_NAME}
+
+                    echo "Running Trivy image scan..."
 
                     trivy image \
                         --severity HIGH,CRITICAL \
@@ -104,13 +121,18 @@ pipeline {
             }
         }
 
-        stage('Update Helm Image') {
+        stage('Update Helm Image Tag') {
             steps {
                 sh '''
-                    sed -i "s|tag: \".*\"|tag: \"${IMAGE_TAG}\"|" \
-                    helm/tetris/values.yaml
+                    echo "Updating Helm image tag..."
 
-                    grep -n "repository\\|tag:" helm/tetris/values.yaml
+                    sed -i "s|tag: \".*\"|tag: \"${IMAGE_TAG}\"|" \
+                        helm/tetris/values.yaml
+
+                    echo "Updated Helm values:"
+
+                    grep -n "repository\\|tag:" \
+                        helm/tetris/values.yaml
                 '''
             }
         }
@@ -123,8 +145,12 @@ pipeline {
 
                     git add helm/tetris/values.yaml
 
-                    git diff --cached --quiet || \
-                    git commit -m "Update Tetris image to ${IMAGE_TAG} [ci skip]"
+                    if git diff --cached --quiet; then
+                        echo "No Helm changes to commit."
+                    else
+                        git commit \
+                            -m "Update Tetris image to ${IMAGE_TAG} [ci skip]"
+                    fi
                 '''
             }
         }
@@ -132,6 +158,8 @@ pipeline {
         stage('Push Helm Changes') {
             steps {
                 sh '''
+                    echo "Pushing Helm image tag update..."
+
                     git push origin HEAD:main
                 '''
             }
@@ -139,13 +167,20 @@ pipeline {
     }
 
     post {
+
         success {
-            echo 'Tetris CI/CD pipeline completed successfully.'
-            echo "Docker image: ${IMAGE_NAME}"
+            echo '=========================================='
+            echo 'Tetris CI/CD Pipeline Completed'
+            echo '=========================================='
+            echo "Docker Image: ${IMAGE_NAME}"
+            echo "Image Tag:    ${IMAGE_TAG}"
+            echo '=========================================='
         }
 
         failure {
-            echo 'Tetris CI/CD pipeline failed.'
+            echo '=========================================='
+            echo 'Tetris CI/CD Pipeline FAILED'
+            echo '=========================================='
         }
     }
 }
