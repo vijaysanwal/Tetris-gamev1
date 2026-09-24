@@ -155,7 +155,6 @@ pipeline {
                 '''
             }
         }
-
         stage('Push Helm Changes') {
             steps {
                 withCredentials([
@@ -175,7 +174,7 @@ pipeline {
                         git push origin HEAD:main
         
                         git config --unset credential.helper
-                    '''
+                    }
                 }
             }
         }
