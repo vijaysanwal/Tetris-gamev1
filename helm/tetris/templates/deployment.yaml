@@ -1,5 +1,6 @@
 apiVersion: apps/v1
 kind: Deployment
+
 metadata:
   name: tetris
   labels:
@@ -18,11 +19,12 @@ spec:
         app: tetris
 
     spec:
+      imagePullSecrets:
+        - name: ecr-registry-secret
+
       containers:
         - name: tetris
-
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-
           imagePullPolicy: {{ .Values.image.pullPolicy }}
 
           ports:
