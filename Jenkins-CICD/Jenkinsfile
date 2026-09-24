@@ -23,6 +23,7 @@ pipeline {
             steps {
                 git(
                     branch: 'main',
+                    credentialsId: 'github-tetris',
                     url: 'https://github.com/vijaysanwal/Tetris-gamev1.git'
                 )
             }
@@ -157,11 +158,26 @@ pipeline {
 
         stage('Push Helm Changes') {
             steps {
-                sh '''
-                    echo "Pushing Helm image tag update..."
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'github-tetris',
+                        usernameVariable: 'GIT_USERNAME',
+                        passwordVariable: 'GIT_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        echo "Pushing Helm image tag update..."
 
-                    git push origin HEAD:main
-                '''
+                        git config credential.helper '!f() {
+                            echo username=$GIT_USERNAME
+                            echo password=$GIT_PASSWORD
+                        }; f'
+
+                        git push origin HEAD:main
+
+                        git config --unset credential.helper
+                    '''
+                }
             }
         }
     }
